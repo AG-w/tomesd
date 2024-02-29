@@ -1,4 +1,4 @@
-# Token Merging for Stable Diffusion
+# Token ~~Merging~~ Downsampling for Stable Diffusion
 
 Using nothing but pure python and pytorch, ToMe for SD speeds up diffusion by merging _redundant_ tokens.
 
