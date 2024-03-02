@@ -1,5 +1,11 @@
 # Token ~~Merging~~ Downsampling for Stable Diffusion
 
+
+Please go to https://github.com/AG-w/sd-webui-todo/ for actual working extension
+    
+    
+    
+----    
 Using nothing but pure python and pytorch, ToMe for SD speeds up diffusion by merging _redundant_ tokens.
 
 ![ToMe for SD applied on a 2048x2048 image.](https://raw.githubusercontent.com/dbolya/tomesd/main/examples/assets/teaser.jpg)
