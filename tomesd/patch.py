@@ -8,19 +8,11 @@ from .utils import isinstance_str, init_generator
 import math
 import torch.nn.functional as F
 
-def up_or_downsample(item, cur_w, cur_h, new_w, new_h, method):
+def up_or_downsample(item, cur_w, cur_h, new_w, new_h, method="nearest"):
     batch_size = item.shape[0]
 
-    item = item.reshape(batch_size, cur_h, cur_w, -1)
-    item = item.permute(0, 3, 1, 2)
-    df = cur_h // new_h
-    if method in "max_pool":
-        item = F.max_pool2d(item, kernel_size=df, stride=df, padding=0)
-    elif method in "avg_pool":
-        item = F.avg_pool2d(item, kernel_size=df, stride=df, padding=0)
-    else:
-        item = F.interpolate(item, size=(new_h, new_w), mode=method)
-    item = item.permute(0, 2, 3, 1)
+    item = item.reshape(batch_size, cur_h, cur_w, -1).permute(0, 3, 1, 2)
+    item = F.interpolate(item, size=(new_h, new_w), mode=method).permute(0, 2, 3, 1)
     item = item.reshape(batch_size, new_h * new_w, -1)
 
     return item
@@ -29,68 +21,34 @@ def compute_merge(x: torch.Tensor, tome_info: Dict[str, Any]) -> Tuple[Callable,
     original_h, original_w = tome_info["size"]
     original_tokens = original_h * original_w
     downsample = int(math.ceil(math.sqrt(original_tokens // x.shape[1])))
-    
+
     args = tome_info["args"]
-    dim = x.shape[-1]
-    if dim == 320:
-        cur_level = "level_1"
-        downsample_factor = args['downsample_factor']
-        ratio = args['ratio']
-    elif dim == 640:
-        cur_level = "level_2"
-        downsample_factor = args['downsample_factor_level_2']
-        ratio = args['ratio_level_2']
-    else:
-        cur_level = "other"
-        downsample_factor = 1
-        ratio = 0.0   
-
-    cur_h, cur_w = original_h // downsample, original_w // downsample
-    new_h, new_w = cur_h // downsample_factor, cur_w // downsample_factor
-
-   # if tome_info['timestep'] / 1000 > tome_info['args']['timestep_threshold_switch']:
-   #     merge_method = args["merge_method"]
-   # else:
-   #     merge_method = args["secondary_merge_method"]
-    merge_method = args["merge_method"]
+    downsample_factor_1 = args['downsample_factor']
+    downsample_factor_2 = args['downsample_factor_level_2']	
+    downsample_factor_3 = args['downsample_factor_level_3']
 	
-    if cur_level != "other":  #and tome_info['timestep'] / 1000 > tome_info['args']['timestep_threshold_stop']:
-        if merge_method == "downsample" and downsample_factor > 1:
-            m = lambda x: up_or_downsample(x, cur_w, cur_h, new_w, new_h, args["downsample_method"])
-            u = lambda x: up_or_downsample(x, new_w, new_h, cur_w, cur_h, args["downsample_method"])
-        elif merge_method == "similarity" and ratio > 0.0:
-            w = int(math.ceil(original_w / downsample))
-            h = int(math.ceil(original_h / downsample))
-            r = int(x.shape[1] * ratio)
-
-            # Re-init the generator if it hasn't already been initialized or device has changed.
-            if args["generator"] is None:
-                args["generator"] = init_generator(x.device)
-            elif args["generator"].device != x.device:
-                args["generator"] = init_generator(x.device, fallback=args["generator"])
-
-            # If the batch size is odd, then it's not possible for prompted and unprompted images to be in the same
-            # batch, which causes artifacts with use_rand, so force it to be off.
-            use_rand = False if x.shape[0] % 2 == 1 else args["use_rand"]
-            m, u = bipartite_soft_matching_random2d(x, w, h, args["sx"], args["sy"], r,
-                                                    no_rand=not use_rand, generator=args["generator"])
-        else:
-            m, u = (merge.do_nothing, merge.do_nothing)
-    else:
-        m, u = (merge.do_nothing, merge.do_nothing)
-
-    #merge_fn, unmerge_fn = (m, u)
-    #return merge_fn, unmerge_fn
-	
-    m_a, u_a = (m, u) if args["merge_attn"]      else (merge.do_nothing, merge.do_nothing)
-    m_c, u_c = (m, u) if args["merge_crossattn"] else (merge.do_nothing, merge.do_nothing)
-    m_m, u_m = (m, u) if args["merge_mlp"]       else (merge.do_nothing, merge.do_nothing)
-    return m_a, m_c, m_m, u_a, u_c, u_m  # Okay this is probably not very good
-
-
-
-
-
+    cur_h = original_h // downsample
+    cur_w = original_w // downsample
+    print(downsample, " xxx ", downsample_factor_1)
+    m = lambda v: v
+    u = lambda v: v
+    if downsample == 1 and downsample_factor_1 > 1:
+        new_h = int(cur_h / downsample_factor_1)
+        new_w = int(cur_w / downsample_factor_1)
+        m = lambda v: up_or_downsample(v, cur_w, cur_h, new_w, new_h, args["downsample_method"])
+        u = lambda v: up_or_downsample(v, new_w, new_h, cur_w, cur_h, args["downsample_method"])		
+    elif downsample == 2 and downsample_factor_2 > 1:
+        new_h = int(cur_h / downsample_factor_2)
+        new_w = int(cur_w / downsample_factor_2)
+        m = lambda v: up_or_downsample(v, cur_w, cur_h, new_w, new_h, args["downsample_method"])
+        u = lambda v: up_or_downsample(v, new_w, new_h, cur_w, cur_h, args["downsample_method"])
+    elif downsample == 4 and downsample_factor_3 > 1:
+        new_h = int(cur_h / downsample_factor_3)
+        new_w = int(cur_w / downsample_factor_3)
+        m = lambda v: up_or_downsample(v, cur_w, cur_h, new_w, new_h, args["downsample_method"])
+        u = lambda v: up_or_downsample(v, new_w, new_h, cur_w, cur_h, args["downsample_method"])
+		
+    return m, u
 
 
 def make_tome_block(block_class: Type[torch.nn.Module]) -> Type[torch.nn.Module]:
@@ -104,19 +62,16 @@ def make_tome_block(block_class: Type[torch.nn.Module]) -> Type[torch.nn.Module]
         _parent = block_class
 
         def _forward(self, x: torch.Tensor, context: torch.Tensor = None) -> torch.Tensor:
-            m_a, m_c, m_m, u_a, u_c, u_m = compute_merge(x, self._tome_info)
+            m, u = compute_merge(x, self._tome_info)
 
             # This is where the meat of the computation happens
-            x = u_a(self.attn1(m_a(self.norm1(x)), context=context if self.disable_self_attn else None)) + x
-            x = u_c(self.attn2(m_c(self.norm2(x)), context=context)) + x
-            x = u_m(self.ff(m_m(self.norm3(x)))) + x
+            x = self.attn1(self.norm1(x), context = context if self.disable_self_attn else None) + x
+            x = u(self.attn2(m(self.norm2(x)), context = context)) + x
+            x = self.ff(self.norm3(x)) + x
 
             return x
     
     return ToMeBlock
-
-
-
 
 
 
@@ -243,6 +198,7 @@ def apply_patch(
         #timestep_threshold_stop: float = 0.0,
         #secondary_merge_method: str = "similarity",
         downsample_factor_level_2: float = 1,
+	downsample_factor_level_3: float = 1,
         ratio_level_2: float = 0.5
         ):
     """
@@ -306,6 +262,7 @@ def apply_patch(
 
             "downsample_factor_level_2": downsample_factor_level_2, # amount to downsample by at the 2nd down block of unet
             "ratio_level_2": ratio_level_2, # ratio of tokens to merge at the 2nd down block of unet
+	    "downsample_factor_level_3": downsample_factor_level_3,
         }
     }
     hook_tome_model(diffusion_model)
